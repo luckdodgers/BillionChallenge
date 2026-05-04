@@ -24,6 +24,8 @@ Console.WriteLine();
 Console.WriteLine("----");
 Console.WriteLine();
 Console.WriteLine($"Time consumed: {elapsedTime}");
+Console.WriteLine($"Parsing time: {Application.ParsingTime}");
+Console.WriteLine($"Calculations time: {Application.CalculationTime}");
 Console.WriteLine($"Allocated: {allocated / 1024} kb");
 Console.WriteLine($"Current: {currentBytes / 1024} kb");
 Console.WriteLine($"Gen0 cycles: {gen0After - gen0Before}");
