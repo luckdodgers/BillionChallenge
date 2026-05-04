@@ -2,12 +2,10 @@
 
 public static class MeasurementsGenerator
 {
-    public static List<Measurement> Create()
+    public static List<Measurement> Create(string filePath)
     {
         var measurements = new List<Measurement>(1_000_001);
-        
-        var path = Directory.GetCurrentDirectory() + "/measurements3.txt";
-        var lines = File.ReadLines(path);
+        var lines = File.ReadLines(filePath);
         foreach (var line in lines)
         {
             var measurementValues = line.Split(';');
