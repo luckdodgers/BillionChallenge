@@ -1,13 +1,7 @@
 ﻿namespace BillionChallenge;
 
-public class Measurement
+public readonly struct Measurement(string location, double temperature)
 {
-    public string Location;
-    public double Temperature;
-
-    public Measurement(string location, double temperature)
-    {
-        Location = location;
-        Temperature = temperature;
-    }
+    public readonly string Location = location;
+    public readonly double Temperature = temperature;
 }
