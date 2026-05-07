@@ -7,12 +7,13 @@ public static class MeasurementsParser
 {
     private const int BufferSize = 4096;
     
-    public static List<Measurement> Create(string filePath)
+    public static Dictionary<string, Measurements> Create(string filePath)
     {
-        var measurements = new List<Measurement>(10_000_000);
+        var dictionary = new Dictionary<string, Measurements>(10_000);
+        
         Span<char> buffer = new char[4096];
         int nextBufferStartIndex = 0;
-
+        
         using var reader = new StreamReader(filePath, Encoding.UTF8, false, BufferSize * 32);
         while (true)
         {
@@ -32,7 +33,7 @@ public static class MeasurementsParser
                 }
 
                 Span<char> line = unprocessedChars[..endOfLineIndex];
-                ProcessLine(line, measurements);
+                ProcessLine(line, dictionary);
 
                 int skip = endOfLineIndex + 1;
                 if (skip < unprocessedChars.Length && unprocessedChars[skip] == '\n')
@@ -46,16 +47,11 @@ public static class MeasurementsParser
             unprocessedChars.CopyTo(buffer);
             nextBufferStartIndex = unprocessedChars.Length;
         }
-        
-        if (nextBufferStartIndex > 0)
-        {
-            ProcessLine(buffer[..nextBufferStartIndex], measurements);
-        }
-        
-        return measurements;
+
+        return dictionary;
     }
 
-    private static void ProcessLine(Span<char> line, List<Measurement> measurements)
+    private static void ProcessLine(Span<char> line, Dictionary<string, Measurements> resultDictionary)
     {
         if (line.IsEmpty)
         {
@@ -66,7 +62,12 @@ public static class MeasurementsParser
         var location = line[..semicolon];
         var temperatureSpan = line[(semicolon + 1)..];
         var temperature = double.Parse(temperatureSpan);
+        if (!resultDictionary.TryGetValue(location.ToString(), out var measurements))
+        {
+            measurements = new Measurements();
+        }
         
-        measurements.Add(new Measurement(location.ToString(), temperature));
+        measurements.Update(temperature);
+        resultDictionary[location.ToString()] = measurements;
     }
 }
