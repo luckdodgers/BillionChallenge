@@ -11,20 +11,93 @@ public static class MeasurementsParser
     public static Dictionary<string, Measurements> Create(string filePath)
     {
         using var file = new FileStream(
-            filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan);
-        var dictionary = new Dictionary<string, Measurements>(16_000);
+            filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
+        var chunks = GetChunks(file);
+        var resultDictionary = chunks
+            .AsParallel()
+            .Select<Chunk, Dictionary<string, Measurements>>(x => ProcessChunk(filePath, x))
+            .Aggregate((resultDictionary, chunk) =>
+            {
+                foreach (var summary in chunk)
+                {
+                    if (!resultDictionary.TryGetValue(summary.Key, out var measurements))
+                    {
+                        measurements = new Measurements();
+                    }
+                
+                    measurements.Merge(summary.Value);
+                    resultDictionary[summary.Key] = measurements;
+                }
+                
+                return resultDictionary;
+            });
         
-        Span<byte> buffer = new byte[65536];
+        return resultDictionary;
+    }
+    
+    private static List<Chunk> GetChunks(FileStream file)
+    {
+        var chunks = new List<Chunk>(Environment.ProcessorCount);
+        
+        var chunkSize = file.Length / Environment.ProcessorCount;
+        long endByteIndex = -1;
+        
+        for (var coreNumber = 0; coreNumber < Environment.ProcessorCount; coreNumber++)
+        {
+            var startByteIndex = endByteIndex + 1;
+            while (IsNewLineOrDefaultByte(file, startByteIndex))
+            {
+                startByteIndex++;
+            }
+
+            endByteIndex = startByteIndex + chunkSize;
+            
+            while (!IsNewLineOrDefaultByte(file, endByteIndex) && endByteIndex < file.Length)
+            {
+                endByteIndex++;
+            }
+
+            endByteIndex--;
+
+            var length = endByteIndex + 1 - startByteIndex;
+            var chunkIndexes = new Chunk(startByteIndex, length);
+            chunks.Add(chunkIndexes);
+        }
+
+        // var chunk = chunks.Last();
+        // var buffer = new byte[chunk.Length];
+        // file.Seek(chunk.StartPosition, SeekOrigin.Begin);
+        // file.Read(buffer, 0, (int)chunk.Length);
+        // var rawString = Encoding.UTF8.GetString(buffer, 0, (int)chunk.Length);
+        
+        return chunks;
+    }
+
+    private static Dictionary<string, Measurements> ProcessChunk(string filePath, Chunk chunk)
+    {
+        using var file = new FileStream(
+            filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
+        file.Seek(chunk.StartPosition, SeekOrigin.Begin);
+        
+        var dictionary = new Dictionary<string, Measurements>(16_000);
+        var locationsPool = new LocationsPool();
+
+        Span<byte> buffer = new byte[4096];
         int nextBufferStartIndex = 0;
+        long bytesRemaining = chunk.Length;
+        
         while (true)
         {
-            int bytesRead = file.Read(buffer[nextBufferStartIndex..]);
+            var bytesToRead = (int)Math.Min(buffer.Length - nextBufferStartIndex, bytesRemaining);
+            var bytesRead = file.Read(buffer[nextBufferStartIndex..(nextBufferStartIndex + bytesToRead)]);
             if (bytesRead == 0)
             {
                 break;
             }
             
+            bytesRemaining -= bytesRead;
             var unprocessedChars = buffer[..(nextBufferStartIndex + bytesRead)];
+            
             while (true)
             {
                 int endOfLineIndex = unprocessedChars.IndexOfAny(NewLine, CarriageReturn);
@@ -34,7 +107,7 @@ public static class MeasurementsParser
                 }
 
                 Span<byte> line = unprocessedChars[..endOfLineIndex];
-                ProcessLine(line, dictionary);
+                ProcessLine(line, locationsPool, dictionary);
                 int skip = endOfLineIndex + 1;
                 if (skip < unprocessedChars.Length && unprocessedChars[skip] == NewLine)
                 {
@@ -51,7 +124,8 @@ public static class MeasurementsParser
         return dictionary;
     }
 
-    private static void ProcessLine(Span<byte> line, Dictionary<string, Measurements> resultDictionary)
+    private static void ProcessLine(
+        Span<byte> line, LocationsPool locationsPool, Dictionary<string, Measurements> resultDictionary)
     {
         if (line.IsEmpty)
         {
@@ -59,7 +133,9 @@ public static class MeasurementsParser
         }
 
         int semicolon = line.IndexOf(Semicolon);
-        var location = Encoding.UTF8.GetString(line[..semicolon]);
+        Span<char> locationChars = stackalloc char[line[..semicolon].Length];
+        Encoding.UTF8.GetChars(line[..semicolon], locationChars);
+        var location =  locationsPool.GetOrAdd(locationChars); // Encoding.UTF8.GetString(line[..semicolon]);
         var temperature = double.Parse(line[(semicolon + 1)..]);
         if (!resultDictionary.TryGetValue(location, out var measurements))
         {
@@ -68,5 +144,14 @@ public static class MeasurementsParser
         
         measurements.Update(temperature);
         resultDictionary[location] = measurements;
+    }
+    
+    private static bool IsNewLineOrDefaultByte(FileStream file, long index)
+    {
+        file.Seek(index, SeekOrigin.Begin);
+        var @byte = file.ReadByte();
+        //var @char = ((char)@byte).ToString();
+        
+        return @byte is NewLine or CarriageReturn or 0;
     }
 }
