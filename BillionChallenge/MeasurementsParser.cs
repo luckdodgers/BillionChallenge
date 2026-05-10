@@ -8,37 +8,43 @@ public static class MeasurementsParser
     private const byte CarriageReturn = 0x0D; // \r
     private const byte Semicolon = 0x3B;
     
-    public static Dictionary<string, Measurements> Create(string filePath)
+    public static Dictionary<string, Measurements> Create(string filePath, out PerformanceCounter performanceCounter)
     {
+        performanceCounter = new PerformanceCounter();
+        performanceCounter.Start();
+        
         using var file = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
         var chunks = GetChunks(file);
-        var resultDictionary = chunks
+        var result = chunks
             .AsParallel()
-            .Select<Chunk, Dictionary<string, Measurements>>(x => ProcessChunk(filePath, x))
-            .Aggregate((resultDictionary, chunk) =>
+            .Select<Chunk, (Dictionary<string, Measurements> measurementsDictionary, long bytesAllocated)>(x => ProcessChunk(filePath, x))
+            .Aggregate((aggregated, chunk) =>
             {
-                foreach (var summary in chunk)
+                foreach (var summary in chunk.measurementsDictionary)
                 {
-                    if (!resultDictionary.TryGetValue(summary.Key, out var measurements))
+                    if (!aggregated.measurementsDictionary.TryGetValue(summary.Key, out var measurements))
                     {
                         measurements = new Measurements();
                     }
                 
                     measurements.Merge(summary.Value);
-                    resultDictionary[summary.Key] = measurements;
+                    aggregated.measurementsDictionary[summary.Key] = measurements;
                 }
                 
-                return resultDictionary;
+                aggregated.bytesAllocated += chunk.bytesAllocated;
+                
+                return aggregated;
             });
         
-        return resultDictionary;
+        performanceCounter.AddHeapAllocations(result.bytesAllocated);
+        
+        return result.measurementsDictionary;
     }
     
     private static List<Chunk> GetChunks(FileStream file)
     {
         var chunks = new List<Chunk>(Environment.ProcessorCount);
-        
         var chunkSize = file.Length / Environment.ProcessorCount;
         long endByteIndex = -1;
         
@@ -63,18 +69,14 @@ public static class MeasurementsParser
             var chunkIndexes = new Chunk(startByteIndex, length);
             chunks.Add(chunkIndexes);
         }
-
-        // var chunk = chunks.Last();
-        // var buffer = new byte[chunk.Length];
-        // file.Seek(chunk.StartPosition, SeekOrigin.Begin);
-        // file.Read(buffer, 0, (int)chunk.Length);
-        // var rawString = Encoding.UTF8.GetString(buffer, 0, (int)chunk.Length);
         
         return chunks;
     }
 
-    private static Dictionary<string, Measurements> ProcessChunk(string filePath, Chunk chunk)
+    private static (Dictionary<string, Measurements> result, long bytesAllocated) ProcessChunk(string filePath, Chunk chunk)
     {
+        var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
+        
         using var file = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
         file.Seek(chunk.StartPosition, SeekOrigin.Begin);
@@ -120,8 +122,10 @@ public static class MeasurementsParser
             unprocessedChars.CopyTo(buffer);
             nextBufferStartIndex = unprocessedChars.Length;
         }
+        
+        var finalHeapSize = GC.GetAllocatedBytesForCurrentThread();
 
-        return dictionary;
+        return (dictionary, finalHeapSize - initialHeapSize);
     }
 
     private static void ProcessLine(
@@ -135,8 +139,9 @@ public static class MeasurementsParser
         int semicolon = line.IndexOf(Semicolon);
         Span<char> locationChars = stackalloc char[line[..semicolon].Length];
         Encoding.UTF8.GetChars(line[..semicolon], locationChars);
-        var location =  locationsPool.GetOrAdd(locationChars); // Encoding.UTF8.GetString(line[..semicolon]);
+        var location = locationsPool.GetOrAdd(locationChars);
         var temperature = double.Parse(line[(semicolon + 1)..]);
+        
         if (!resultDictionary.TryGetValue(location, out var measurements))
         {
             measurements = new Measurements();
