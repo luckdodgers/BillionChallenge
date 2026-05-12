@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.IO.MemoryMappedFiles;
+using System.Text;
 
 namespace BillionChallenge;
 
@@ -15,10 +16,14 @@ public static class MeasurementsParser
         
         using var file = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
+        using var mmf = MemoryMappedFile.CreateFromFile(
+            file, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, true);
+        
         var chunks = GetChunks(file);
         var result = chunks
             .AsParallel()
-            .Select<Chunk, (Dictionary<string, Measurements> measurementsDictionary, long bytesAllocated)>(x => ProcessChunk(filePath, x))
+            .Select<Chunk, (Dictionary<string, Measurements> measurementsDictionary, long bytesAllocated)>(x => 
+                ProcessChunk(mmf, x))
             .Aggregate((aggregated, chunk) =>
             {
                 foreach (var summary in chunk.measurementsDictionary)
@@ -73,25 +78,24 @@ public static class MeasurementsParser
         return chunks;
     }
 
-    private static (Dictionary<string, Measurements> result, long bytesAllocated) ProcessChunk(string filePath, Chunk chunk)
+    private static (Dictionary<string, Measurements> result, long bytesAllocated) ProcessChunk(
+        MemoryMappedFile mmf, Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
         
-        using var file = new FileStream(
-            filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
-        file.Seek(chunk.StartPosition, SeekOrigin.Begin);
-        
+        using var viewStream = mmf.CreateViewStream(0, 0, MemoryMappedFileAccess.Read);
+        viewStream.Seek(chunk.StartPosition, SeekOrigin.Begin);
         var dictionary = new Dictionary<string, Measurements>(16_000);
         var locationsPool = new LocationsPool();
 
-        Span<byte> buffer = new byte[4096];
+        Span<byte> buffer = new byte[32768];
         int nextBufferStartIndex = 0;
         long bytesRemaining = chunk.Length;
         
         while (true)
         {
             var bytesToRead = (int)Math.Min(buffer.Length - nextBufferStartIndex, bytesRemaining);
-            var bytesRead = file.Read(buffer[nextBufferStartIndex..(nextBufferStartIndex + bytesToRead)]);
+            var bytesRead = viewStream.Read(buffer[nextBufferStartIndex..(nextBufferStartIndex + bytesToRead)]);
             if (bytesRead == 0)
             {
                 break;
@@ -110,6 +114,7 @@ public static class MeasurementsParser
 
                 Span<byte> line = unprocessedChars[..endOfLineIndex];
                 ProcessLine(line, locationsPool, dictionary);
+                
                 int skip = endOfLineIndex + 1;
                 if (skip < unprocessedChars.Length && unprocessedChars[skip] == NewLine)
                 {
@@ -155,7 +160,6 @@ public static class MeasurementsParser
     {
         file.Seek(index, SeekOrigin.Begin);
         var @byte = file.ReadByte();
-        //var @char = ((char)@byte).ToString();
         
         return @byte is NewLine or CarriageReturn or 0;
     }
