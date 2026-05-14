@@ -145,7 +145,7 @@ public static class MeasurementsParser
         Span<char> locationChars = stackalloc char[line[..semicolon].Length];
         Encoding.UTF8.GetChars(line[..semicolon], locationChars);
         var location = locationsPool.GetOrAdd(locationChars);
-        var temperature = double.Parse(line[(semicolon + 1)..]);
+        var temperature = IntParser.Parse(line[(semicolon + 1)..]);
         
         if (!resultDictionary.TryGetValue(location, out var measurements))
         {
