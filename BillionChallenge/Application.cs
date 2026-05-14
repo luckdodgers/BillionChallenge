@@ -8,7 +8,7 @@ public static class Application
         
         foreach (var summary in locationsSummaryDictionary)
         {
-            Console.WriteLine($"{summary.Key};{summary.Value.Min};{summary.Value.Average};{summary.Value.Max}");
+            Console.WriteLine($"{summary.Key};{(double)summary.Value.Min / 10};{summary.Value.Average / 10};{(double)summary.Value.Max / 10}");
         }
         
         counter.Stop();

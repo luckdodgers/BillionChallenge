@@ -2,13 +2,13 @@
 
 public struct Measurements
 {
-    public long Count;
-    public double Sum;
-    public double Min;
-    public double Max;
-    public double Average => Sum / Count;
+    public nint Count;
+    public nint Sum;
+    public nint Min;
+    public nint Max;
+    public double Average => Sum / (double)Count;
 
-    public void Update(double value)
+    public void Update(nint value)
     {
         Count++;
         Sum += value;
