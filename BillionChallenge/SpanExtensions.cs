@@ -8,35 +8,30 @@ public static class SpanExtensions
 {
     public static int SimdIndexOf(this ReadOnlySpan<byte> span, byte byteToSearch)
     {
+        const int vectorLength = 32; // Vector256<byte>.Count
         int startIndex = 0;
-        int iterations = 0;
-        Vector<byte> matchVector;
+        Vector256<byte> matchVector;
         
         while (true)
         {
-            if (startIndex + startIndex + Vector<byte>.Count >= span.Length)
+            if (startIndex + startIndex + vectorLength >= span.Length)
             {
-                var result = span[startIndex..].IndexOf(byteToSearch);
-                return result != -1 ? result + Vector<byte>.Count * iterations : result;
+                return span.IndexOf(byteToSearch);
             }
             
-            var spanVector = new Vector<byte>(span[startIndex..(startIndex + Vector<byte>.Count)]);
-            var searchVector = new Vector<byte>(byteToSearch);
-            matchVector = Vector.Equals(spanVector, searchVector);
-            if (!matchVector.Equals(Vector<byte>.Zero))
+            var spanVector =  Vector256.Create(span[startIndex..(startIndex + vectorLength)]);
+            var searchVector = Vector256.Create(byteToSearch);
+            matchVector = Avx2.CompareEqual(spanVector, searchVector);
+            if (!matchVector.Equals(Vector256<byte>.Zero))
             {
                 break;
             }
             
-            startIndex += Vector<byte>.Count;
-            iterations++;
+            startIndex += vectorLength;
         }
-
-        var matchVector256 = matchVector.AsVector256();
-        var bitmask = Avx2.MoveMask(matchVector256);
+        
+        var bitmask = Avx2.MoveMask(matchVector);
         var trailingZerosCount = BitOperations.TrailingZeroCount(bitmask);
-
-        var test = BitOperations.PopCount((nuint)bitmask);
         
         return startIndex + trailingZerosCount;
     }
