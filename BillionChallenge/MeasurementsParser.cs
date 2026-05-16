@@ -106,7 +106,7 @@ public static class MeasurementsParser
             
             while (true)
             {
-                int endOfLineIndex = unprocessedChars.IndexOfAny(NewLine, CarriageReturn);
+                int endOfLineIndex = unprocessedChars.SimdIndexOf(NewLine);
                 if (endOfLineIndex == -1)
                 {
                     break;
