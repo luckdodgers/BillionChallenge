@@ -6,7 +6,6 @@ namespace BillionChallenge;
 public static class MeasurementsParser
 {
     private const byte NewLine = 0x0A; // \n
-    private const byte CarriageReturn = 0x0D; // \r
     private const byte Semicolon = 0x3B;
     
     public static Dictionary<string, Measurements> Create(string filePath, out PerformanceCounter performanceCounter)
@@ -136,11 +135,6 @@ public static class MeasurementsParser
     private static void ProcessLine(
         Span<byte> line, LocationsPool locationsPool, Dictionary<string, Measurements> resultDictionary)
     {
-        if (line.IsEmpty)
-        {
-            return;
-        }
-
         int semicolon = line.IndexOf(Semicolon);
         Span<char> locationChars = stackalloc char[line[..semicolon].Length];
         Encoding.UTF8.GetChars(line[..semicolon], locationChars);
@@ -161,6 +155,6 @@ public static class MeasurementsParser
         file.Seek(index, SeekOrigin.Begin);
         var @byte = file.ReadByte();
         
-        return @byte is NewLine or CarriageReturn or 0;
+        return @byte is NewLine or 0;
     }
 }

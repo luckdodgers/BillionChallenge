@@ -7,7 +7,7 @@ public struct Measurements
     public nint Min;
     public nint Max;
     public double Average => Sum / (double)Count;
-
+    
     public void Update(nint value)
     {
         Count++;
@@ -23,7 +23,7 @@ public struct Measurements
             Max = value;
         }
     }
-
+    
     public void Merge(Measurements measurementsToMerge)
     {
         Count += measurementsToMerge.Count;
