@@ -2,7 +2,7 @@ namespace BillionChallenge;
 
 public class LocationsPool
 {
-    private Dictionary<string, string> _locations = new(10_000);
+    private readonly Dictionary<string, string> _locations = new(16_000);
     
     public string GetOrAdd(Span<char> locationSpan)
     {

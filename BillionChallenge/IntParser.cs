@@ -1,9 +1,12 @@
+using System.Runtime.CompilerServices;
+
 namespace BillionChallenge;
 
 public static class IntParser
 {
     private const byte Minus = 0x2D;
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static nint Parse(ReadOnlySpan<byte> bytes)
     {
         nint multiplier = 1;
