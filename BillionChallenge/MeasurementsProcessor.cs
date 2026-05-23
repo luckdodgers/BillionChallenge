@@ -100,16 +100,12 @@ public class MeasurementsProcessor : IDisposable
         while (true)
         {
             var bytesLeftToRead = chunk.Length - bytesRead;
-            if (bytesLeftToRead <= 0)
+            if (bytesLeftToRead <= 0 || *ptr == 0)
             {
                 break;
             }
-            var bytesToRead = (int)Math.Min(150, bytesLeftToRead);
+            var bytesToRead = (int)Math.Min(4096, bytesLeftToRead);
             var buffer = new Span<byte>(ptr, bytesToRead);
-            if (buffer[0] == 0)
-            {
-                break;
-            }
             var newLineIndex = buffer.SimdIndexOf(NewLine);
             var foundNewLine = newLineIndex != -1;
             if (!foundNewLine)
