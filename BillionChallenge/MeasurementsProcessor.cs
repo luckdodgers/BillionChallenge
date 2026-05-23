@@ -1,5 +1,6 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace BillionChallenge;
@@ -135,16 +136,12 @@ public class MeasurementsProcessor : IDisposable
     {
         int semicolon = line.IndexOf(Semicolon);
         var pointer = Unsafe.AsPointer(ref line[0]);
-        var locationSpan = new UnsafeSpan((byte*)pointer, (uint)semicolon);
         var temperature = IntParser.Parse(line[(semicolon + 1)..]);
-        
-        if (!resultDictionary.TryGetValue(locationSpan, out var measurements))
-        {
-            measurements = new Measurements();
-        }
+
+        ref var measurements = ref CollectionsMarshal.GetValueRefOrAddDefault(
+            resultDictionary, new UnsafeSpan((byte*)pointer, (uint)semicolon), out _);
         
         measurements.Update(temperature);
-        resultDictionary[locationSpan] = measurements;
     }
     
     private static bool IsNewLineOrDefaultByte(FileStream file, long index)
