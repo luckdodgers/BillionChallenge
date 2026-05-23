@@ -2,41 +2,44 @@
 
 public struct Measurements
 {
-    public nint Count;
-    public nint Sum;
-    public nint Min;
-    public nint Max;
-    public double Average => Sum / (double)Count;
+    private nint _count;
+    private nint _sum;
+    private nint _min;
+    private nint _max;
+    
+    public double Average => _sum / _count * 0.1;
+    public double Min => _min * 0.1;
+    public double Max => _max * 0.1;
     
     public void Update(nint value)
     {
-        Count++;
-        Sum += value;
+        _count++;
+        _sum += value;
         
-        if (value < Min)
+        if (value < _min)
         {
-            Min = value;
+            _min = value;
         }
         
-        if (value > Max)
+        if (value > _max)
         {
-            Max = value;
+            _max = value;
         }
     }
     
     public void Merge(Measurements measurementsToMerge)
     {
-        Count += measurementsToMerge.Count;
-        Sum += measurementsToMerge.Sum;
+        _count += measurementsToMerge._count;
+        _sum += measurementsToMerge._sum;
 
-        if (measurementsToMerge.Min < Min)
+        if (measurementsToMerge._min < _min)
         {
-            Min = measurementsToMerge.Min;
+            _min = measurementsToMerge._min;
         }
 
-        if (measurementsToMerge.Max > Max)
+        if (measurementsToMerge._max > _max)
         {
-            Max = measurementsToMerge.Max;
+            _max = measurementsToMerge._max;
         }
     }
 }

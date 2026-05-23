@@ -4,25 +4,22 @@ namespace BillionChallenge;
 
 public readonly unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<UnsafeSpan>
 {
-    public readonly byte* Pointer = pointer;
-    public readonly nuint Length = length;
-    
-    public ReadOnlySpan<byte> Span => new(Pointer, (int)Length);
-
     public bool Equals(UnsafeSpan other) => Span.SequenceEqual(other.Span);
+    
+    private ReadOnlySpan<byte> Span => new(pointer, (int)length);
 
     public override int GetHashCode()
     {
         uint hash = 2166136261;
 
-        for (nuint i = 0; i < Math.Min(4, Length); i++)
+        for (nuint i = 0; i < Math.Min(4, length); i++)
         {
-            hash ^= Pointer[i];
+            hash ^= pointer[i];
             hash *= 16777619;
         }
 
         return (int)hash;
     }
 
-    public override string ToString() => new((sbyte*)Pointer, 0, (int)Length, Encoding.UTF8);
+    public override string ToString() => new((sbyte*)pointer, 0, (int)length, Encoding.UTF8);
 }
