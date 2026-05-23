@@ -1,6 +1,5 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics;
 using Microsoft.Win32.SafeHandles;
 
 namespace BillionChallenge;
@@ -13,8 +12,6 @@ public class MeasurementsProcessor : IDisposable
     private readonly MemoryMappedViewAccessor _accessor;
     private readonly SafeMemoryMappedViewHandle _safeHandle;
 
-    private static readonly byte[] ZeroByteArray = [0, 0, 0];
-    
     private const byte NewLine = 0x0A; // \n
     private const byte Semicolon = 0x3B;
 
@@ -103,16 +100,12 @@ public class MeasurementsProcessor : IDisposable
         while (true)
         {
             var bytesLeftToRead = chunk.Length - bytesRead;
-            if (bytesLeftToRead <= 0)
+            if (bytesLeftToRead <= 0 || *ptr == 0)
             {
                 break;
             }
-            var bytesToRead = (int)Math.Min(150, bytesLeftToRead);
+            var bytesToRead = (int)Math.Min(4096, bytesLeftToRead);
             var buffer = new Span<byte>(ptr, bytesToRead);
-            if (IsZeroByteSpan(buffer))
-            {
-                break;
-            }
             var newLineIndex = buffer.SimdIndexOf(NewLine);
             var foundNewLine = newLineIndex != -1;
             if (!foundNewLine)
@@ -160,20 +153,6 @@ public class MeasurementsProcessor : IDisposable
         var @byte = file.ReadByte();
         
         return @byte is NewLine or 0;
-    }
-
-    private static bool IsZeroByteSpan(ReadOnlySpan<byte> span)
-    {
-        switch (span.Length)
-        {
-            case >= SpanExtensions.Vector256Length:
-            {
-                var bufferVector = Vector256.Create(span[..SpanExtensions.Vector256Length]);
-                return bufferVector.Equals(Vector256<byte>.Zero);
-            }
-            default:
-                return span.SequenceEqual(ZeroByteArray.AsSpan());
-        }
     }
 
     public void Dispose()
