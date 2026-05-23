@@ -4,14 +4,24 @@ public static class Application
 {
     public static PerformanceCounter PrintResult(string filePath)
     {
-        var locationsSummaryDictionary = MeasurementsParser.Create(filePath, out var counter);
-        
-        foreach (var summary in locationsSummaryDictionary)
+        PerformanceCounter counter;
+        var processor = new MeasurementsProcessor(filePath);
+        try
         {
-            Console.WriteLine($"{summary.Key};{(double)summary.Value.Min / 10};{summary.Value.Average / 10};{(double)summary.Value.Max / 10}");
+            var result = processor.Create(out counter);
+            foreach (var summary in result)
+            {
+                Console.WriteLine(
+                    $"{summary.Key.ToString()};{(double)summary.Value.Min / 10};{summary.Value.Average / 10};{(double)summary.Value.Max / 10}");
+            }
+
+            counter.Stop();
+        }
+        finally
+        {
+            processor.Dispose();
         }
         
-        counter.Stop();
         return counter;
     }
 }
