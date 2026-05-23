@@ -1,7 +1,7 @@
 namespace BillionChallenge;
 
-public readonly struct Chunk(long startPosition, long length)
+public readonly struct Chunk(nuint startPosition, nuint length)
 {
-    public readonly long StartPosition = startPosition;
-    public readonly long Length = length;
+    public readonly nuint StartPosition = startPosition;
+    public readonly nuint Length = length;
 }

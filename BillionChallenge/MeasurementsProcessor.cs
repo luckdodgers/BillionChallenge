@@ -66,12 +66,12 @@ public class MeasurementsProcessor : IDisposable
     {
         var chunks = new List<Chunk>(Environment.ProcessorCount);
         var chunkSize = file.Length / Environment.ProcessorCount;
-        long endByteIndex = -2;
+        nint endByteIndex = -2;
         
         for (var coreNumber = 0; coreNumber < Environment.ProcessorCount; coreNumber++)
         {
-            var startByteIndex = endByteIndex + 2;
-            endByteIndex = startByteIndex + chunkSize;
+            nint startByteIndex = endByteIndex + 2;
+            endByteIndex = startByteIndex + (nint)chunkSize;
             
             while (endByteIndex < file.Length && !IsNewLineOrDefaultByte(file, endByteIndex))
             {
@@ -81,7 +81,7 @@ public class MeasurementsProcessor : IDisposable
             endByteIndex--;
 
             var length = endByteIndex + 1 - startByteIndex;
-            var chunkIndexes = new Chunk(startByteIndex, length);
+            var chunkIndexes = new Chunk((nuint)startByteIndex, (nuint)length);
             chunks.Add(chunkIndexes);
         }
         
@@ -91,11 +91,11 @@ public class MeasurementsProcessor : IDisposable
     private unsafe (Dictionary<UnsafeSpan, Measurements> result, long bytesAllocated) ProcessChunk(Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
-        var ptr = (byte*)_pointer + (nint)chunk.StartPosition;
+        var ptr = (byte*)_pointer + chunk.StartPosition;
         var initialPtr = ptr;
         
         var dictionary = new Dictionary<UnsafeSpan, Measurements>(16_000);
-        long bytesRead = 0;
+        nuint bytesRead = 0;
 
         while (true)
         {
@@ -104,8 +104,8 @@ public class MeasurementsProcessor : IDisposable
             {
                 break;
             }
-            var bytesToRead = (int)Math.Min(4096, bytesLeftToRead);
-            var buffer = new Span<byte>(ptr, bytesToRead);
+            var bytesToRead = Math.Min(4096, bytesLeftToRead);
+            var buffer = new Span<byte>(ptr, (int)bytesToRead);
             var newLineIndex = buffer.SimdIndexOf(NewLine);
             var foundNewLine = newLineIndex != -1;
             if (!foundNewLine)
@@ -117,7 +117,7 @@ public class MeasurementsProcessor : IDisposable
             
             ProcessLine(lineSpan, dictionary);
             
-            bytesRead += lineSpan.Length;
+            bytesRead += (nuint)lineSpan.Length;
             if (foundNewLine)
             {
                 bytesRead++;
