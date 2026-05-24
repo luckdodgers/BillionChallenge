@@ -38,19 +38,17 @@ public class MeasurementsProcessor : IDisposable
         var chunks = GetChunks(_fileStream);
         var result = chunks
             .AsParallel()
-            .WithDegreeOfParallelism(Environment.ProcessorCount)
+#if DEBUG
+            .WithDegreeOfParallelism(1)
+#endif
             .Select<Chunk, (Dictionary<UnsafeSpan, Measurements> measurementsDictionary, long bytesAllocated)>(ProcessChunk)
             .Aggregate((aggregated, chunk) =>
             {
                 foreach (var summary in chunk.measurementsDictionary)
                 {
-                    if (!aggregated.measurementsDictionary.TryGetValue(summary.Key, out var measurements))
-                    {
-                        measurements = new Measurements();
-                    }
-                
+                    ref var measurements = 
+                        ref CollectionsMarshal.GetValueRefOrAddDefault(aggregated.measurementsDictionary, summary.Key, out _);
                     measurements.Merge(summary.Value);
-                    aggregated.measurementsDictionary[summary.Key] = measurements;
                 }
                 
                 aggregated.bytesAllocated += chunk.bytesAllocated;
@@ -74,7 +72,7 @@ public class MeasurementsProcessor : IDisposable
             nint startByteIndex = endByteIndex + 2;
             endByteIndex = startByteIndex + (nint)chunkSize;
             
-            while (endByteIndex < file.Length && !IsNewLineOrDefaultByte(file, endByteIndex))
+            while (endByteIndex < file.Length && !IsNewLine(file, endByteIndex))
             {
                 endByteIndex++;
             }
@@ -92,6 +90,7 @@ public class MeasurementsProcessor : IDisposable
     private unsafe (Dictionary<UnsafeSpan, Measurements> result, long bytesAllocated) ProcessChunk(Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
+        
         var ptr = (byte*)_pointer + chunk.StartPosition;
         var initialPtr = ptr;
         
@@ -113,17 +112,11 @@ public class MeasurementsProcessor : IDisposable
             {
                 newLineIndex = buffer.Length;
             }
-            newLineIndex = newLineIndex == -1 ? buffer.Length : newLineIndex;
-            var lineSpan = buffer[..newLineIndex];
             
+            var lineSpan = buffer[..newLineIndex];
             ProcessLine(lineSpan, dictionary);
             
-            bytesRead += (nuint)lineSpan.Length;
-            if (foundNewLine)
-            {
-                bytesRead++;
-            }
-            
+            bytesRead += (nuint)lineSpan.Length + *(byte*)&foundNewLine; // Cast bool to nuint
             ptr = initialPtr + (int)bytesRead;
         }
         
@@ -131,25 +124,25 @@ public class MeasurementsProcessor : IDisposable
 
         return (dictionary, finalHeapSize - initialHeapSize);
     }
-
+    
     private static unsafe void ProcessLine(Span<byte> line, Dictionary<UnsafeSpan, Measurements> resultDictionary)
     {
         int semicolon = line.IndexOf(Semicolon);
-        var pointer = Unsafe.AsPointer(ref line[0]);
+        var lineStartPointer = Unsafe.AsPointer(ref line[0]);
         var temperature = IntParser.Parse(line[(semicolon + 1)..]);
 
         ref var measurements = ref CollectionsMarshal.GetValueRefOrAddDefault(
-            resultDictionary, new UnsafeSpan((byte*)pointer, (uint)semicolon), out _);
+            resultDictionary, new UnsafeSpan((byte*)lineStartPointer, (nuint)semicolon), out _);
         
         measurements.Update(temperature);
     }
     
-    private static bool IsNewLineOrDefaultByte(FileStream file, long index)
+    private static bool IsNewLine(FileStream file, long index)
     {
         file.Seek(index, SeekOrigin.Begin);
         var @byte = file.ReadByte();
         
-        return @byte is NewLine or 0;
+        return @byte is NewLine;
     }
 
     public void Dispose()

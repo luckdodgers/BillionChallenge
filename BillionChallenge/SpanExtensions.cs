@@ -6,7 +6,7 @@ namespace BillionChallenge;
 
 public static class SpanExtensions
 {
-    public const int Vector256Length = 32;
+    private const int Vector256Length = 32;
     
     public static int SimdIndexOf(this ReadOnlySpan<byte> span, byte byteToSearch)
     {

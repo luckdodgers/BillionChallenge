@@ -11,13 +11,13 @@ public static class Application
         var processor = new MeasurementsProcessor(filePath);
         var result = processor.Create(out var counter);
         var orderedResult = result
-            .Select(x => (x.Key.ToString(), x.Value))
-            .OrderBy(x => x.Item1, StringComparer.Ordinal);
+            .Select(x => (x.Key, x.Value))
+            .OrderBy(x => x.Key);
         
         foreach (var summary in orderedResult)
         {
             Console.WriteLine(
-                $"{summary.Item1};{summary.Value.Min:0.0};{summary.Value.Average:0.0};{summary.Value.Max:0.0}");
+                $"{summary.Key};{summary.Value.Min:0.0};{summary.Value.Average:0.0};{summary.Value.Max:0.0}");
         }
 
         counter.Stop();
