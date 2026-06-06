@@ -61,24 +61,102 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
         return (int)hash;
     }
     
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public int CompareTo(UnsafeSpan other)
     {
-        var minLength = Math.Min(SafeSpan.Length, other.SafeSpan.Length);
-        int i = 0;
+        nuint minLength = Length < other.Length ? Length : other.Length;
+        nuint i = 0;
         
-        while (i < minLength)
-        { 
-            var result = SafeSpan[i] - other.SafeSpan[i];
-            if (result != 0)
+        if (minLength >= 32)
+        {
+            nuint limit = minLength - 32;
+            while (i <= limit)
             {
-                return result;
-            }
+                var a = Unsafe.ReadUnaligned<Vector256<byte>>(Pointer + i);
+                var b = Unsafe.ReadUnaligned<Vector256<byte>>(other.Pointer + i);
 
-            i++;
+                var eq = Vector256.Equals(a, b);
+                uint mask = ~eq.ExtractMostSignificantBits();
+
+                if (mask != 0)
+                {
+                    int lane = BitOperations.TrailingZeroCount(mask);
+                    return Pointer[i + (nuint)lane] - other.Pointer[i + (nuint)lane];
+                }
+
+                i += 32;
+            }
         }
         
-        return SafeSpan.Length - other.SafeSpan.Length;
+        if (i + 16 <= minLength)
+        {
+            var a = Unsafe.ReadUnaligned<Vector128<byte>>(Pointer + i);
+            var b = Unsafe.ReadUnaligned<Vector128<byte>>(other.Pointer + i);
+        
+            var eq = Vector128.Equals(a, b);
+            uint mask = (~(uint)eq.ExtractMostSignificantBits()) & 0xFFFF;
+        
+            if (mask != 0)
+            {
+                int lane = BitOperations.TrailingZeroCount(mask);
+                return Pointer[i + (nuint)lane] - other.Pointer[i + (nuint)lane];
+            }
+        
+            i += 16;
+        }
+        
+        while (i < minLength)
+        {
+            int diff = Pointer[i] - other.Pointer[i];
+            if (diff != 0) return diff;
+            i++;
+        }
+
+        return (int)Length - (int)other.Length;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public bool UnsafeEquals(UnsafeSpan other)
+    {
+        if (Length != other.Length)
+            return false;
+
+        nuint length = Length;
+        nuint i = 0;
+        
+        if (length >= 32)
+        {
+            nuint limit = length - 32;
+            while (i <= limit)
+            {
+                var a = Unsafe.ReadUnaligned<Vector256<byte>>(Pointer + i);
+                var b = Unsafe.ReadUnaligned<Vector256<byte>>(other.Pointer + i);
+                if (Vector256.Equals(a, b).ExtractMostSignificantBits() != 0xFFFFFFFF)
+                    return false;
+
+                i += 32;
+            }
+        }
+        
+        if (i + 16 <= length)
+        {
+            var a = Unsafe.ReadUnaligned<Vector128<byte>>(Pointer + i);
+            var b = Unsafe.ReadUnaligned<Vector128<byte>>(other.Pointer + i);
+
+            if ((Vector128.Equals(a, b).ExtractMostSignificantBits() & 0xFFFF) != 0xFFFF)
+                return false;
+
+            i += 16;
+        }
+        
+        while (i < length)
+        {
+            if (Pointer[i] != other.Pointer[i])
+                return false;
+            i++;
+        }
+
+        return true;
     }
     
     public override string ToString() => new((sbyte*)Pointer, 0, (int)Length, Encoding.UTF8);

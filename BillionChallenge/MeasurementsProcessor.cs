@@ -1,37 +1,17 @@
-using System.IO.MemoryMappedFiles;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Text.Unicode;
-using Microsoft.Win32.SafeHandles;
-
 namespace BillionChallenge;
 
 public class MeasurementsProcessor : IDisposable
 {
     private readonly string _filePath;
-    private readonly nint _pointer;
     private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmf;
-    private readonly MemoryMappedViewAccessor _accessor;
-    private readonly SafeMemoryMappedViewHandle _safeHandle;
 
     private const byte NewLine = 0x0A; // \n
-    private const byte Semicolon = 0x3B;
 
-    public unsafe MeasurementsProcessor(string filePath)
+    public MeasurementsProcessor(string filePath)
     {
         _filePath = filePath;
         _fileStream = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
-        _mmf = MemoryMappedFile.CreateFromFile(
-            _fileStream, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, true);
-        _accessor = _mmf.CreateViewAccessor(0, _fileStream.Length, MemoryMappedFileAccess.Read);
-        _safeHandle = _accessor.SafeMemoryMappedViewHandle;
-        
-        byte* ptr = null;
-        _safeHandle.AcquirePointer(ref ptr);
-        _pointer = (nint)(ptr + _accessor.PointerOffset);
     }
     
     public ResultDictionary Create(out PerformanceCounter performanceCounter)
@@ -79,8 +59,6 @@ public class MeasurementsProcessor : IDisposable
             {
                 endByteIndex++;
             }
-            
-            //endByteIndex--;
 
             var length = endByteIndex + 1 - startByteIndex;
             var chunkIndexes = new Chunk((nuint)startByteIndex, (nuint)length);
@@ -110,15 +88,13 @@ public class MeasurementsProcessor : IDisposable
                 var bytesToRead = Math.Min(bufferSize, bytesLeft);
                 var bufferSpan = buffer.AsSpan(0, (int)bytesToRead);
                 
-                var bytesRead = RandomAccess.Read(fileHandle, bufferSpan, startIndex);
+                RandomAccess.Read(fileHandle, bufferSpan, startIndex);
                 var endlineIndex = bufferSpan.SimdIndexOf(NewLine);
                 var lineSpan = new UnsafeSpan(segmentPtr, (nuint)endlineIndex);
                 var parsedLine = lineSpan.ParseLine();
                 
                 ref var measurements = ref resultDictionary.GetRefValueOrAddDefault(parsedLine.location);
-        
                 measurements.Update(parsedLine.temperature);
-                var locationStr = parsedLine.location.ToString();
 
                 startIndex += endlineIndex + 1;
                 bytesLeft -= endlineIndex + 1;
@@ -140,10 +116,6 @@ public class MeasurementsProcessor : IDisposable
 
     public void Dispose()
     {
-        _safeHandle.ReleasePointer();
-        _safeHandle.Dispose();
-        _accessor.Dispose();
-        _mmf.Dispose();
         _fileStream.Dispose();
     }
 }

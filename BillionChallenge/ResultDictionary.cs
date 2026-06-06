@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace BillionChallenge;
 
@@ -11,9 +12,15 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
     private const int MaxKeyBytes = 100;
     
     private readonly Entry[] _entries = new Entry[Capacity];
-    private readonly byte[] _keysArena = new byte[MaxElements * MaxKeyBytes];
+    private readonly byte[] _keysArena = GC.AllocateArray<byte>(MaxElements * MaxKeyBytes, pinned: true);
+    private readonly unsafe byte* _arenaPointer;
     
     private nuint _arenaTopFreeIndex;
+
+    public unsafe ResultDictionary()
+    {
+        _arenaPointer = (byte*)Unsafe.AsPointer(ref _keysArena[0]);
+    }
 
     public unsafe ref Measurements GetRefValueOrAddDefault(UnsafeSpan location)
     {
@@ -26,10 +33,7 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
             if (entry.HashCode == 0)
             {
                 var offset = _arenaTopFreeIndex;
-                fixed (byte* freeBytePointer = &_keysArena[_arenaTopFreeIndex])
-                {
-                    Unsafe.CopyBlockUnaligned(freeBytePointer, location.Pointer, (uint)location.Length);
-                }
+                Unsafe.CopyBlockUnaligned(_arenaPointer + _arenaTopFreeIndex, location.Pointer, (uint)location.Length);
                 
                 _arenaTopFreeIndex += location.Length;
                 entry.KeyOffset = offset;
@@ -39,12 +43,11 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
                 return ref entry.Value;
             }
 
-            fixed (byte* locationStart = &_keysArena[entry.KeyOffset])
+            if (entry.HashCode == keyHash && 
+                entry.KeyLength == location.Length && 
+                new UnsafeSpan(_arenaPointer + entry.KeyOffset, entry.KeyLength).UnsafeEquals(location))
             {
-                if (entry.HashCode == keyHash && new UnsafeSpan(locationStart, entry.KeyLength).Equals(location))
-                {
-                    return ref entry.Value;
-                }
+                return ref entry.Value;
             }
  
             entriesIndex = (entriesIndex + 1) & CapacityMask;
@@ -82,13 +85,13 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
                 if (entries[index].HashCode != 0)
                 {
                     _currentIndex = index;
+                    _current = GetCurrentEntry();
                     return true;
                 }
                 index++;
             }
  
             _currentIndex = index;
-            _current = GetCurrentEntry();
             return false;
         }
         
@@ -104,10 +107,8 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
         private unsafe KeyValuePair<UnsafeSpan, Measurements> GetCurrentEntry()
         {
             ref var entry = ref _dict._entries[_currentIndex];
-            fixed (byte* freeBytePointer = &_dict._keysArena[entry.KeyOffset])
-            {
-                return new KeyValuePair<UnsafeSpan, Measurements>(new UnsafeSpan(freeBytePointer, entry.KeyLength), entry.Value);
-            }
+            return new KeyValuePair<UnsafeSpan, Measurements>(
+                new UnsafeSpan(_dict._arenaPointer + entry.KeyOffset, entry.KeyLength), entry.Value);
         }
     }
 }
