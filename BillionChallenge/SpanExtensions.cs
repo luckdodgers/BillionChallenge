@@ -1,39 +1,39 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 
 namespace BillionChallenge;
 
 public static class SpanExtensions
 {
-    private const int Vector256Length = 32;
-    
-    public static int SimdIndexOf(this ReadOnlySpan<byte> span, byte byteToSearch)
+    public static unsafe long SimdIndexOf(this ReadOnlySpan<byte> span, byte byteToSearch)
     {
-        int startIndex = 0;
-        Vector256<byte> matchVector;
-        
-        while (true)
+        const int vector256Length = 32;
+
+        if (span.IsEmpty)
         {
-            if (startIndex + startIndex + Vector256Length >= span.Length)
-            {
-                return span.IndexOf(byteToSearch);
-            }
-            
-            var spanVector = Vector256.Create(span[startIndex..(startIndex + Vector256Length)]);
-            var searchVector = Vector256.Create(byteToSearch);
-            matchVector = Avx2.CompareEqual(spanVector, searchVector);
-            if (!matchVector.Equals(Vector256<byte>.Zero))
-            {
-                break;
-            }
-            
-            startIndex += Vector256Length;
+            return -1;
         }
         
-        var bitmask = Avx2.MoveMask(matchVector);
-        var trailingZerosCount = BitOperations.TrailingZeroCount(bitmask);
+        fixed (byte* spanStartPointer = &span[0])
+        {
+            int startIndex = 0;
+            while (startIndex < span.Length)
+            {
+                var searchSpanVector = Unsafe.ReadUnaligned<Vector256<byte>>(spanStartPointer + startIndex);
+                var byteToSearchVector = Vector256.Create(byteToSearch);
+                var matchingVector = Vector256.Equals(searchSpanVector, byteToSearchVector);
+                var bitmask = matchingVector.ExtractMostSignificantBits();
+                if (bitmask == 0)
+                {
+                    startIndex += vector256Length;
+                    continue;
+                }
+            
+                return BitOperations.TrailingZeroCount(bitmask) + startIndex;
+            }   
+        }
         
-        return startIndex + trailingZerosCount;
+        return -1;
     }
 }

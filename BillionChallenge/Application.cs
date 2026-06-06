@@ -17,7 +17,7 @@ public static class Application
         foreach (var summary in orderedResult)
         {
             Console.WriteLine(
-                $"{summary.Key};{summary.Value.Min:0.0};{summary.Value.Average:0.0};{summary.Value.Max:0.0}");
+                $"{summary.Key};{summary.Value.Average:0.0};{summary.Value.Min:0.0};{summary.Value.Max:0.0}");
         }
 
         counter.Stop();

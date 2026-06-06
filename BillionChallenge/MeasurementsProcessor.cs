@@ -1,12 +1,15 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Unicode;
 using Microsoft.Win32.SafeHandles;
 
 namespace BillionChallenge;
 
 public class MeasurementsProcessor : IDisposable
 {
+    private readonly string _filePath;
     private readonly nint _pointer;
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmf;
@@ -18,6 +21,7 @@ public class MeasurementsProcessor : IDisposable
 
     public unsafe MeasurementsProcessor(string filePath)
     {
+        _filePath = filePath;
         _fileStream = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
         _mmf = MemoryMappedFile.CreateFromFile(
@@ -30,7 +34,7 @@ public class MeasurementsProcessor : IDisposable
         _pointer = (nint)(ptr + _accessor.PointerOffset);
     }
     
-    public Dictionary<UnsafeSpan, Measurements> Create(out PerformanceCounter performanceCounter)
+    public ResultDictionary Create(out PerformanceCounter performanceCounter)
     {
         performanceCounter = new PerformanceCounter();
         performanceCounter.Start();
@@ -41,14 +45,13 @@ public class MeasurementsProcessor : IDisposable
 #if DEBUG
             .WithDegreeOfParallelism(1)
 #endif
-            .Select<Chunk, (Dictionary<UnsafeSpan, Measurements> measurementsDictionary, long bytesAllocated)>(ProcessChunk)
+            .Select<Chunk, (ResultDictionary resultDictionary, long bytesAllocated)>(ProcessChunk)
             .Aggregate((aggregated, chunk) =>
             {
-                foreach (var summary in chunk.measurementsDictionary)
+                foreach (var chunkSummary in chunk.resultDictionary)
                 {
-                    ref var measurements = 
-                        ref CollectionsMarshal.GetValueRefOrAddDefault(aggregated.measurementsDictionary, summary.Key, out _);
-                    measurements.Merge(summary.Value);
+                    ref var measurements = ref aggregated.resultDictionary.GetRefValueOrAddDefault(chunkSummary.Key);
+                    measurements.Merge(chunkSummary.Value);
                 }
                 
                 aggregated.bytesAllocated += chunk.bytesAllocated;
@@ -58,7 +61,7 @@ public class MeasurementsProcessor : IDisposable
         
         performanceCounter.AddHeapAllocations(result.bytesAllocated);
         
-        return result.measurementsDictionary;
+        return result.resultDictionary;
     }
     
     private static List<Chunk> GetChunks(FileStream file)
@@ -77,7 +80,7 @@ public class MeasurementsProcessor : IDisposable
                 endByteIndex++;
             }
             
-            endByteIndex--;
+            //endByteIndex--;
 
             var length = endByteIndex + 1 - startByteIndex;
             var chunkIndexes = new Chunk((nuint)startByteIndex, (nuint)length);
@@ -87,54 +90,44 @@ public class MeasurementsProcessor : IDisposable
         return chunks;
     }
 
-    private unsafe (Dictionary<UnsafeSpan, Measurements> result, long bytesAllocated) ProcessChunk(Chunk chunk)
+    private unsafe (ResultDictionary result, long bytesAllocated) ProcessChunk(Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
         
-        var ptr = (byte*)_pointer + chunk.StartPosition;
-        var initialPtr = ptr;
+        const long bufferSize = 4096;
+        using var fileHandle = File.OpenHandle(
+            _filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
         
-        var dictionary = new Dictionary<UnsafeSpan, Measurements>(16_000);
-        nuint bytesRead = 0;
+        var resultDictionary = new ResultDictionary();
+        var buffer = new byte[bufferSize];
+        var bytesLeft = (long)chunk.Length;
+        var startIndex = (long)chunk.StartPosition;
 
-        while (true)
+        fixed (byte* segmentPtr = &buffer[0])
         {
-            var bytesLeftToRead = chunk.Length - bytesRead;
-            if (bytesLeftToRead <= 0 || *ptr == 0)
+            while (bytesLeft > 0)
             {
-                break;
-            }
-            var bytesToRead = Math.Min(4096, bytesLeftToRead);
-            var buffer = new Span<byte>(ptr, (int)bytesToRead);
-            var newLineIndex = buffer.SimdIndexOf(NewLine);
-            var foundNewLine = newLineIndex != -1;
-            if (!foundNewLine)
-            {
-                newLineIndex = buffer.Length;
-            }
-            
-            var lineSpan = buffer[..newLineIndex];
-            ProcessLine(lineSpan, dictionary);
-            
-            bytesRead += (nuint)lineSpan.Length + *(byte*)&foundNewLine; // Cast bool to nuint
-            ptr = initialPtr + (int)bytesRead;
+                var bytesToRead = Math.Min(bufferSize, bytesLeft);
+                var bufferSpan = buffer.AsSpan(0, (int)bytesToRead);
+                
+                var bytesRead = RandomAccess.Read(fileHandle, bufferSpan, startIndex);
+                var endlineIndex = bufferSpan.SimdIndexOf(NewLine);
+                var lineSpan = new UnsafeSpan(segmentPtr, (nuint)endlineIndex);
+                var parsedLine = lineSpan.ParseLine();
+                
+                ref var measurements = ref resultDictionary.GetRefValueOrAddDefault(parsedLine.location);
+        
+                measurements.Update(parsedLine.temperature);
+                var locationStr = parsedLine.location.ToString();
+
+                startIndex += endlineIndex + 1;
+                bytesLeft -= endlineIndex + 1;
+            }   
         }
         
         var finalHeapSize = GC.GetAllocatedBytesForCurrentThread();
 
-        return (dictionary, finalHeapSize - initialHeapSize);
-    }
-    
-    private static unsafe void ProcessLine(Span<byte> line, Dictionary<UnsafeSpan, Measurements> resultDictionary)
-    {
-        int semicolon = line.IndexOf(Semicolon);
-        var lineStartPointer = Unsafe.AsPointer(ref line[0]);
-        var temperature = IntParser.Parse(line[(semicolon + 1)..]);
-
-        ref var measurements = ref CollectionsMarshal.GetValueRefOrAddDefault(
-            resultDictionary, new UnsafeSpan((byte*)lineStartPointer, (nuint)semicolon), out _);
-        
-        measurements.Update(temperature);
+        return (resultDictionary, finalHeapSize - initialHeapSize);
     }
     
     private static bool IsNewLine(FileStream file, long index)

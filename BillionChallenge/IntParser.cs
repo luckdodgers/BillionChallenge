@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace BillionChallenge;
 
@@ -7,8 +8,9 @@ public static class IntParser
     private const byte Minus = 0x2D;
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static nint Parse(ReadOnlySpan<byte> bytes)
+    public static nint Parse(UnsafeSpan span)
     {
+        var bytes = span.SafeSpan;
         nint multiplier = 1;
         nint fractionDigit = bytes[^1] - 48;
         nint lastIntDigit = bytes[^3] - 48;
