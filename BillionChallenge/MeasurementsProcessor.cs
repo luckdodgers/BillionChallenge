@@ -1,36 +1,22 @@
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 
 namespace BillionChallenge;
 
 public class MeasurementsProcessor : IDisposable
 {
-    private readonly nint _pointer;
+    private readonly string _filePath;
     private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmf;
-    private readonly MemoryMappedViewAccessor _accessor;
-    private readonly SafeMemoryMappedViewHandle _safeHandle;
 
     private const byte NewLine = 0x0A; // \n
-    private const byte Semicolon = 0x3B;
 
-    public unsafe MeasurementsProcessor(string filePath)
+    public MeasurementsProcessor(string filePath)
     {
+        _filePath = filePath;
         _fileStream = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
-        _mmf = MemoryMappedFile.CreateFromFile(
-            _fileStream, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, true);
-        _accessor = _mmf.CreateViewAccessor(0, _fileStream.Length, MemoryMappedFileAccess.Read);
-        _safeHandle = _accessor.SafeMemoryMappedViewHandle;
-        
-        byte* ptr = null;
-        _safeHandle.AcquirePointer(ref ptr);
-        _pointer = (nint)(ptr + _accessor.PointerOffset);
     }
     
-    public Dictionary<UnsafeSpan, Measurements> Create(out PerformanceCounter performanceCounter)
+    public ResultDictionary Create(out PerformanceCounter performanceCounter)
     {
         performanceCounter = new PerformanceCounter();
         performanceCounter.Start();
@@ -38,19 +24,16 @@ public class MeasurementsProcessor : IDisposable
         var chunks = GetChunks(_fileStream);
         var result = chunks
             .AsParallel()
-            .WithDegreeOfParallelism(Environment.ProcessorCount)
-            .Select<Chunk, (Dictionary<UnsafeSpan, Measurements> measurementsDictionary, long bytesAllocated)>(ProcessChunk)
+#if DEBUG
+            .WithDegreeOfParallelism(1)
+#endif
+            .Select<Chunk, (ResultDictionary resultDictionary, long bytesAllocated)>(ProcessChunk)
             .Aggregate((aggregated, chunk) =>
             {
-                foreach (var summary in chunk.measurementsDictionary)
+                foreach (var chunkSummary in chunk.resultDictionary)
                 {
-                    if (!aggregated.measurementsDictionary.TryGetValue(summary.Key, out var measurements))
-                    {
-                        measurements = new Measurements();
-                    }
-                
-                    measurements.Merge(summary.Value);
-                    aggregated.measurementsDictionary[summary.Key] = measurements;
+                    ref var measurements = ref aggregated.resultDictionary.GetRefValueOrAddDefault(chunkSummary.Key);
+                    measurements.Merge(chunkSummary.Value);
                 }
                 
                 aggregated.bytesAllocated += chunk.bytesAllocated;
@@ -60,7 +43,7 @@ public class MeasurementsProcessor : IDisposable
         
         performanceCounter.AddHeapAllocations(result.bytesAllocated);
         
-        return result.measurementsDictionary;
+        return result.resultDictionary;
     }
     
     private static List<Chunk> GetChunks(FileStream file)
@@ -74,12 +57,10 @@ public class MeasurementsProcessor : IDisposable
             nint startByteIndex = endByteIndex + 2;
             endByteIndex = startByteIndex + (nint)chunkSize;
             
-            while (endByteIndex < file.Length && !IsNewLineOrDefaultByte(file, endByteIndex))
+            while (endByteIndex < file.Length && !IsNewLine(file, endByteIndex))
             {
                 endByteIndex++;
             }
-            
-            endByteIndex--;
 
             var length = endByteIndex + 1 - startByteIndex;
             var chunkIndexes = new Chunk((nuint)startByteIndex, (nuint)length);
@@ -89,75 +70,63 @@ public class MeasurementsProcessor : IDisposable
         return chunks;
     }
 
-    private unsafe (Dictionary<UnsafeSpan, Measurements> result, long bytesAllocated) ProcessChunk(Chunk chunk)
+    private unsafe (ResultDictionary result, long bytesAllocated) ProcessChunk(Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
-        var ptr = (byte*)_pointer + chunk.StartPosition;
-        var initialPtr = ptr;
         
-        var dictionary = new Dictionary<UnsafeSpan, Measurements>(16_000);
-        nuint bytesRead = 0;
+        const long bufferSize = 1024 * 1024;
+        using var fileHandle = File.OpenHandle(
+            _filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
+        
+        var resultDictionary = new ResultDictionary();
+        var buffer = new byte[bufferSize];
+        var bytesLeft = (long)chunk.Length;
+        var startIndex = (long)chunk.StartPosition;
 
-        while (true)
+        fixed (byte* segmentPtr = &buffer[0])
         {
-            var bytesLeftToRead = chunk.Length - bytesRead;
-            if (bytesLeftToRead <= 0 || *ptr == 0)
+            while (bytesLeft > 0)
             {
-                break;
+                RandomAccess.Read(fileHandle, buffer, startIndex);
+                var lastEndlineIndex = buffer.LastIndexOf(NewLine);
+                var parsableSpan = new UnsafeSpan(segmentPtr, (nuint)lastEndlineIndex);
+                ProcessBuffer(resultDictionary, parsableSpan);
+
+                startIndex += lastEndlineIndex + 1;
+                bytesLeft -= lastEndlineIndex + 1;
             }
-            var bytesToRead = Math.Min(4096, bytesLeftToRead);
-            var buffer = new Span<byte>(ptr, (int)bytesToRead);
-            var newLineIndex = buffer.SimdIndexOf(NewLine);
-            var foundNewLine = newLineIndex != -1;
-            if (!foundNewLine)
-            {
-                newLineIndex = buffer.Length;
-            }
-            newLineIndex = newLineIndex == -1 ? buffer.Length : newLineIndex;
-            var lineSpan = buffer[..newLineIndex];
-            
-            ProcessLine(lineSpan, dictionary);
-            
-            bytesRead += (nuint)lineSpan.Length;
-            if (foundNewLine)
-            {
-                bytesRead++;
-            }
-            
-            ptr = initialPtr + (int)bytesRead;
         }
         
         var finalHeapSize = GC.GetAllocatedBytesForCurrentThread();
 
-        return (dictionary, finalHeapSize - initialHeapSize);
+        return (resultDictionary, finalHeapSize - initialHeapSize);
     }
 
-    private static unsafe void ProcessLine(Span<byte> line, Dictionary<UnsafeSpan, Measurements> resultDictionary)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe void ProcessBuffer(ResultDictionary resultDictionary, UnsafeSpan bufferSegment)
     {
-        int semicolon = line.IndexOf(Semicolon);
-        var pointer = Unsafe.AsPointer(ref line[0]);
-        var temperature = IntParser.Parse(line[(semicolon + 1)..]);
-
-        ref var measurements = ref CollectionsMarshal.GetValueRefOrAddDefault(
-            resultDictionary, new UnsafeSpan((byte*)pointer, (uint)semicolon), out _);
-        
-        measurements.Update(temperature);
+        var bytesToRead = bufferSegment.Length;
+        while (bytesToRead != UIntPtr.MaxValue)
+        {
+            var endlineIndex = bufferSegment.SimdIndexOf(NewLine);
+            var lineSpan = new UnsafeSpan(bufferSegment.Pointer, endlineIndex);
+            lineSpan.UpdateResultDictionary(resultDictionary);
+            bytesToRead -= endlineIndex + 1;
+            bufferSegment = new UnsafeSpan(lineSpan.Pointer + endlineIndex + 1, bytesToRead);
+        }
     }
     
-    private static bool IsNewLineOrDefaultByte(FileStream file, long index)
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool IsNewLine(FileStream file, long index)
     {
         file.Seek(index, SeekOrigin.Begin);
         var @byte = file.ReadByte();
         
-        return @byte is NewLine or 0;
+        return @byte is NewLine;
     }
 
     public void Dispose()
     {
-        _safeHandle.ReleasePointer();
-        _safeHandle.Dispose();
-        _accessor.Dispose();
-        _mmf.Dispose();
         _fileStream.Dispose();
     }
 }
