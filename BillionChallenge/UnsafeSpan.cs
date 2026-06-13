@@ -15,15 +15,14 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     public bool Equals(UnsafeSpan other) => SafeSpan.SequenceEqual(other.SafeSpan);
     
     public ReadOnlySpan<byte> SafeSpan => new(Pointer, (int)Length);
-    
-    // Trims Length to represent location only, returns temperature
-    public (UnsafeSpan location, IntPtr temperature) ParseLine()
+
+    public void UpdateResultDictionary(ResultDictionary resultDictionary)
     {
         int semicolonIndex = (int)SimdIndexOf(Semicolon);
         var temperature = IntParser.Parse(new UnsafeSpan(Pointer + semicolonIndex + 1, Length - (nuint)semicolonIndex - 1));
         var locationSpan = new UnsafeSpan(Pointer, (nuint)semicolonIndex);
-        
-        return (locationSpan, temperature);
+        ref var measurements = ref resultDictionary.GetRefValueOrAddDefault(locationSpan);
+        measurements.Update(temperature);
     }
     
     public nuint SimdIndexOf(byte byteToSearch)
@@ -37,13 +36,14 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
             var byteToSearchVector = Vector256.Create(byteToSearch);
             var matchingVector = Vector256.Equals(searchSpanVector, byteToSearchVector);
             var bitmask = matchingVector.ExtractMostSignificantBits();
-            if (bitmask == 0)
+            switch (bitmask)
             {
-                startIndex += vector256Length;
-                continue;
+                case 0:
+                    startIndex += vector256Length;
+                    continue;
+                default:
+                    return (nuint)BitOperations.TrailingZeroCount(bitmask) + startIndex;
             }
-            
-            return (nuint)BitOperations.TrailingZeroCount(bitmask) + startIndex;
         }
     }
     
@@ -72,11 +72,11 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
             nuint limit = minLength - 32;
             while (i <= limit)
             {
-                var a = Unsafe.ReadUnaligned<Vector256<byte>>(Pointer + i);
-                var b = Unsafe.ReadUnaligned<Vector256<byte>>(other.Pointer + i);
+                var thisVector = Unsafe.ReadUnaligned<Vector256<byte>>(Pointer + i);
+                var otherVector = Unsafe.ReadUnaligned<Vector256<byte>>(other.Pointer + i);
 
-                var eq = Vector256.Equals(a, b);
-                uint mask = ~eq.ExtractMostSignificantBits();
+                var equalityVector = Vector256.Equals(thisVector, otherVector);
+                uint mask = ~equalityVector.ExtractMostSignificantBits();
 
                 if (mask != 0)
                 {
@@ -88,27 +88,13 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
             }
         }
         
-        if (i + 16 <= minLength)
-        {
-            var a = Unsafe.ReadUnaligned<Vector128<byte>>(Pointer + i);
-            var b = Unsafe.ReadUnaligned<Vector128<byte>>(other.Pointer + i);
-        
-            var eq = Vector128.Equals(a, b);
-            uint mask = (~(uint)eq.ExtractMostSignificantBits()) & 0xFFFF;
-        
-            if (mask != 0)
-            {
-                int lane = BitOperations.TrailingZeroCount(mask);
-                return Pointer[i + (nuint)lane] - other.Pointer[i + (nuint)lane];
-            }
-        
-            i += 16;
-        }
-        
         while (i < minLength)
         {
             int diff = Pointer[i] - other.Pointer[i];
-            if (diff != 0) return diff;
+            if (diff != 0)
+            {
+                return diff;
+            }
             i++;
         }
 
@@ -119,7 +105,9 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     public bool UnsafeEquals(UnsafeSpan other)
     {
         if (Length != other.Length)
+        {
             return false;
+        }
 
         nuint length = Length;
         nuint i = 0;
@@ -129,35 +117,33 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
             nuint limit = length - 32;
             while (i <= limit)
             {
-                var a = Unsafe.ReadUnaligned<Vector256<byte>>(Pointer + i);
-                var b = Unsafe.ReadUnaligned<Vector256<byte>>(other.Pointer + i);
-                if (Vector256.Equals(a, b).ExtractMostSignificantBits() != 0xFFFFFFFF)
+                var thisVector = Unsafe.ReadUnaligned<Vector256<byte>>(Pointer + i);
+                var otherVector = Unsafe.ReadUnaligned<Vector256<byte>>(other.Pointer + i);
+                if (Vector256.Equals(thisVector, otherVector).ExtractMostSignificantBits() != 0xFFFFFFFF)
+                {
                     return false;
+                }
 
                 i += 32;
             }
         }
         
-        if (i + 16 <= length)
-        {
-            var a = Unsafe.ReadUnaligned<Vector128<byte>>(Pointer + i);
-            var b = Unsafe.ReadUnaligned<Vector128<byte>>(other.Pointer + i);
-
-            if ((Vector128.Equals(a, b).ExtractMostSignificantBits() & 0xFFFF) != 0xFFFF)
-                return false;
-
-            i += 16;
-        }
-        
         while (i < length)
         {
             if (Pointer[i] != other.Pointer[i])
+            {
                 return false;
+            }
+            
             i++;
         }
 
         return true;
     }
+
+    // 1-based index
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public byte IndexFromEnd(nuint index) => *(Pointer + Length - index);
     
     public override string ToString() => new((sbyte*)Pointer, 0, (int)Length, Encoding.UTF8);
 }

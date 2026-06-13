@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace BillionChallenge;
 
 public class MeasurementsProcessor : IDisposable
@@ -72,7 +74,7 @@ public class MeasurementsProcessor : IDisposable
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
         
-        const long bufferSize = 4096;
+        const long bufferSize = 1024 * 1024;
         using var fileHandle = File.OpenHandle(
             _filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
         
@@ -85,27 +87,36 @@ public class MeasurementsProcessor : IDisposable
         {
             while (bytesLeft > 0)
             {
-                var bytesToRead = Math.Min(bufferSize, bytesLeft);
-                var bufferSpan = buffer.AsSpan(0, (int)bytesToRead);
-                
-                RandomAccess.Read(fileHandle, bufferSpan, startIndex);
-                var endlineIndex = bufferSpan.SimdIndexOf(NewLine);
-                var lineSpan = new UnsafeSpan(segmentPtr, (nuint)endlineIndex);
-                var parsedLine = lineSpan.ParseLine();
-                
-                ref var measurements = ref resultDictionary.GetRefValueOrAddDefault(parsedLine.location);
-                measurements.Update(parsedLine.temperature);
+                RandomAccess.Read(fileHandle, buffer, startIndex);
+                var lastEndlineIndex = buffer.LastIndexOf(NewLine);
+                var parsableSpan = new UnsafeSpan(segmentPtr, (nuint)lastEndlineIndex);
+                ProcessBuffer(resultDictionary, parsableSpan);
 
-                startIndex += endlineIndex + 1;
-                bytesLeft -= endlineIndex + 1;
-            }   
+                startIndex += lastEndlineIndex + 1;
+                bytesLeft -= lastEndlineIndex + 1;
+            }
         }
         
         var finalHeapSize = GC.GetAllocatedBytesForCurrentThread();
 
         return (resultDictionary, finalHeapSize - initialHeapSize);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe void ProcessBuffer(ResultDictionary resultDictionary, UnsafeSpan bufferSegment)
+    {
+        var bytesToRead = bufferSegment.Length;
+        while (bytesToRead != UIntPtr.MaxValue)
+        {
+            var endlineIndex = bufferSegment.SimdIndexOf(NewLine);
+            var lineSpan = new UnsafeSpan(bufferSegment.Pointer, endlineIndex);
+            lineSpan.UpdateResultDictionary(resultDictionary);
+            bytesToRead -= endlineIndex + 1;
+            bufferSegment = new UnsafeSpan(lineSpan.Pointer + endlineIndex + 1, bytesToRead);
+        }
+    }
     
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static bool IsNewLine(FileStream file, long index)
     {
         file.Seek(index, SeekOrigin.Begin);
