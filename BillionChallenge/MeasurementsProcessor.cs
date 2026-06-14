@@ -16,18 +16,15 @@ public class MeasurementsProcessor : IDisposable
             filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, FileOptions.SequentialScan);
     }
     
-    public ResultDictionary Create(out PerformanceCounter performanceCounter)
+    public ArenaDictionary Calculate(ref PerformanceCounter performanceCounter)
     {
-        performanceCounter = new PerformanceCounter();
-        performanceCounter.Start();
-        
         var chunks = GetChunks(_fileStream);
         var result = chunks
             .AsParallel()
 #if DEBUG
             .WithDegreeOfParallelism(1)
 #endif
-            .Select<Chunk, (ResultDictionary resultDictionary, long bytesAllocated)>(ProcessChunk)
+            .Select<Chunk, (ArenaDictionary resultDictionary, long bytesAllocated)>(ProcessChunk)
             .Aggregate((aggregated, chunk) =>
             {
                 foreach (var chunkSummary in chunk.resultDictionary)
@@ -70,7 +67,7 @@ public class MeasurementsProcessor : IDisposable
         return chunks;
     }
 
-    private unsafe (ResultDictionary result, long bytesAllocated) ProcessChunk(Chunk chunk)
+    private unsafe (ArenaDictionary result, long bytesAllocated) ProcessChunk(Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();
         
@@ -78,7 +75,7 @@ public class MeasurementsProcessor : IDisposable
         using var fileHandle = File.OpenHandle(
             _filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
         
-        var resultDictionary = new ResultDictionary();
+        var resultDictionary = new ArenaDictionary();
         var buffer = new byte[bufferSize];
         var bytesLeft = (long)chunk.Length;
         var startIndex = (long)chunk.StartPosition;
@@ -103,7 +100,7 @@ public class MeasurementsProcessor : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static unsafe void ProcessBuffer(ResultDictionary resultDictionary, UnsafeSpan bufferSegment)
+    private static unsafe void ProcessBuffer(ArenaDictionary resultDictionary, UnsafeSpan bufferSegment)
     {
         var bytesToRead = bufferSegment.Length;
         while (bytesToRead != UIntPtr.MaxValue)
