@@ -44,7 +44,7 @@ public class ArenaDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurements
 
             if (entry.HashCode == keyHash && 
                 entry.KeyLength == location.Length && 
-                new UnsafeSpan(_arenaPointer + entry.KeyOffset, entry.KeyLength).UnsafeEquals(location))
+                new UnsafeSpan(_arenaPointer + entry.KeyOffset, entry.KeyLength).Equals(location))
             {
                 return ref entry.Value;
             }
@@ -101,8 +101,7 @@ public class ArenaDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurements
         }
         
         public void Dispose() {}
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         private unsafe KeyValuePair<UnsafeSpan, Measurements> GetCurrentEntry()
         {
             ref var entry = ref _dict._entries[_currentIndex];

@@ -43,6 +43,7 @@ public class MeasurementsProcessor : IDisposable
         return result.resultDictionary;
     }
     
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static List<Chunk> GetChunks(FileStream file)
     {
         var chunks = new List<Chunk>(Environment.ProcessorCount);
@@ -67,6 +68,7 @@ public class MeasurementsProcessor : IDisposable
         return chunks;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private unsafe (ArenaDictionary result, long bytesAllocated) ProcessChunk(Chunk chunk)
     {
         var initialHeapSize = GC.GetAllocatedBytesForCurrentThread();

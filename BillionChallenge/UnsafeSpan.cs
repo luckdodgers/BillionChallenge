@@ -11,10 +11,6 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     
     public readonly byte* Pointer = pointer;
     public nuint Length = length;
-    
-    public bool Equals(UnsafeSpan other) => SafeSpan.SequenceEqual(other.SafeSpan);
-    
-    public ReadOnlySpan<byte> SafeSpan => new(Pointer, (int)Length);
 
     public void UpdateResultDictionary(ArenaDictionary resultDictionary)
     {
@@ -48,6 +44,7 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     }
     
     // FNV-1a
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
     {
         uint hash = 2166136261;
@@ -102,7 +99,7 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     }
     
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public bool UnsafeEquals(UnsafeSpan other)
+    public bool Equals(UnsafeSpan other)
     {
         if (Length != other.Length)
         {
