@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace BillionChallenge;
 
-public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurements>>
+public class ArenaDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurements>>
 {
     private const int Capacity = 16384;
     private const int CapacityMask = Capacity - 1;
@@ -16,7 +16,7 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
     
     private nuint _arenaTopFreeIndex;
 
-    public unsafe ResultDictionary()
+    public unsafe ArenaDictionary()
     {
         _arenaPointer = (byte*)Unsafe.AsPointer(ref _keysArena[0]);
     }
@@ -62,14 +62,14 @@ public class ResultDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurement
         KeyValuePair<UnsafeSpan, Measurements> IEnumerator<KeyValuePair<UnsafeSpan, Measurements>>.Current => _current;
         object IEnumerator.Current => _current;
         
-        private readonly ResultDictionary _dict;
+        private readonly ArenaDictionary _dict;
         
         private int _currentIndex;
         private KeyValuePair<UnsafeSpan, Measurements> _current;
 
-        internal Enumerator(ResultDictionary dict)
+        internal Enumerator(ArenaDictionary dict)
         {
-            _dict  = dict;
+            _dict = dict;
             _currentIndex = -1;
         }
         

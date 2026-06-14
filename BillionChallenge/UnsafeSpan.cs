@@ -16,7 +16,7 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     
     public ReadOnlySpan<byte> SafeSpan => new(Pointer, (int)Length);
 
-    public void UpdateResultDictionary(ResultDictionary resultDictionary)
+    public void UpdateResultDictionary(ArenaDictionary resultDictionary)
     {
         int semicolonIndex = (int)SimdIndexOf(Semicolon);
         var temperature = IntParser.Parse(new UnsafeSpan(Pointer + semicolonIndex + 1, Length - (nuint)semicolonIndex - 1));
