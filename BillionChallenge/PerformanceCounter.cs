@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace BillionChallenge;
 
@@ -19,6 +20,7 @@ public struct PerformanceCounter
     private long _startStamp;
     private long _totalHeapAllocations;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void Start()
     {
         _gcPauseBefore = GC.GetTotalPauseDuration();
@@ -29,6 +31,7 @@ public struct PerformanceCounter
         _startStamp = Stopwatch.GetTimestamp();
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void Stop()
     {
         ElapsedTime = Stopwatch.GetElapsedTime(_startStamp);
@@ -39,6 +42,7 @@ public struct PerformanceCounter
         Total_GC_pause_ms = GC.GetTotalPauseDuration() - _gcPauseBefore;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void AddHeapAllocations(long bytesAllocated) => 
         Interlocked.Add(ref _totalHeapAllocations, bytesAllocated);
 }

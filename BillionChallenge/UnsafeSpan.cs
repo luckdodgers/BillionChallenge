@@ -14,9 +14,9 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
 
     public void UpdateResultDictionary(ArenaDictionary resultDictionary)
     {
-        int semicolonIndex = (int)SimdIndexOf(Semicolon);
-        var temperature = IntParser.Parse(new UnsafeSpan(Pointer + semicolonIndex + 1, Length - (nuint)semicolonIndex - 1));
-        var locationSpan = new UnsafeSpan(Pointer, (nuint)semicolonIndex);
+        var semicolonIndex = SimdIndexOf(Semicolon);
+        var temperature = IntParser.Parse(new UnsafeSpan(Pointer + semicolonIndex + 1, Length - semicolonIndex - 1));
+        var locationSpan = new UnsafeSpan(Pointer, semicolonIndex);
         ref var measurements = ref resultDictionary.GetRefValueOrAddDefault(locationSpan);
         measurements.Update(temperature);
     }
@@ -47,9 +47,9 @@ public unsafe struct UnsafeSpan(byte* pointer, nuint length) : IEquatable<Unsafe
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
     {
-        uint hash = 2166136261;
-
-        for (nuint i = 0; i < Math.Min(4, Length); i++)
+        var hash = 2166136261;
+        
+        for (nuint i = 0; i < Math.Min(8, Length); i++)
         {
             hash ^= Pointer[i];
             hash *= 16777619;

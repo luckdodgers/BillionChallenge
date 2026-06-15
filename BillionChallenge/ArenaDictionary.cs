@@ -42,9 +42,7 @@ public class ArenaDictionary : IEnumerable<KeyValuePair<UnsafeSpan, Measurements
                 return ref entry.Value;
             }
 
-            if (entry.HashCode == keyHash && 
-                entry.KeyLength == location.Length && 
-                new UnsafeSpan(_arenaPointer + entry.KeyOffset, entry.KeyLength).Equals(location))
+            if (entry.HashCode == keyHash && new UnsafeSpan(_arenaPointer + entry.KeyOffset, entry.KeyLength).Equals(location))
             {
                 return ref entry.Value;
             }
